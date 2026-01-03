@@ -202,8 +202,8 @@ pub fn render(f: &mut Frame, area: Rect, state: &BrowserState) {
 
     let help_spans = vec![
         Span::styled("  ", Style::default()),
-        Span::styled("↑↓", Style::default().fg(ACCENT_COLOR).add_modifier(Modifier::BOLD)),
-        Span::styled(" Navigate", Style::default().fg(BORDER_COLOR)),
+        Span::styled("j/k", Style::default().fg(ACCENT_COLOR).add_modifier(Modifier::BOLD)),
+        Span::styled(" Nav", Style::default().fg(BORDER_COLOR)),
         Span::styled("  │  ", Style::default().fg(BORDER_COLOR)),
         Span::styled("Enter", Style::default().fg(SUCCESS_COLOR).add_modifier(Modifier::BOLD)),
         Span::styled(" Open", Style::default().fg(BORDER_COLOR)),

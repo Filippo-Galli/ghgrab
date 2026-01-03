@@ -325,8 +325,8 @@ async fn handle_input(key: KeyEvent, state: Arc<Mutex<AppState>>, client: &GitHu
                 }
                 
                 // moving around
-                KeyCode::Up => s.move_up(),
-                KeyCode::Down => s.move_down(),
+                KeyCode::Up | KeyCode::Char('k') => s.move_up(),
+                KeyCode::Down | KeyCode::Char('j') => s.move_down(),
                 KeyCode::Home | KeyCode::Char('g') => s.move_top(),
                 KeyCode::End | KeyCode::Char('G') => s.move_bottom(),
                 
