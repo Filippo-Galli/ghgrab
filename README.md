@@ -4,6 +4,8 @@ Ever found a single file or folder in a massive GitHub repo and wished you could
 
 It's a simple, pretty terminal tool that lets you pick what you need and download it instantly. No clutter, no `git clone` waiting times, just the stuff you want.
 
+![ghgrab demo](assets/ghgrab.gif)
+
 ---
 
 ## Why use ghgrab?
