@@ -7,7 +7,7 @@ import urllib.request
 import platform
 from pathlib import Path
 
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 
 def get_platform_info():
     system = platform.system().lower()
@@ -30,13 +30,10 @@ def download_binary():
     if not platform_name:
         return
 
-    # In CI, we usually download a pre-built binary before wheel building
-    # If it's already there (e.g. from GitHub Actions artifacts), dont download
     bin_dir = Path(__file__).parent / "ghgrab"
     bin_dir.mkdir(parents=True, exist_ok=True)
     bin_path = bin_dir / local_name
-    
-    # If the binary is already placed here by CI or manual build, use it
+
     if bin_path.exists() and bin_path.stat().st_size > 100_000:
         print(f"Using existing binary at {bin_path}")
         return
@@ -65,19 +62,18 @@ class BuildPy(build_py):
 class bdist_wheel(_bdist_wheel):
     def finalize_options(self):
         super().finalize_options()
-        # Mark the wheel as platform-specific, not pure-python
+
         self.root_is_pure = False
 
     def get_tag(self):
         python, abi, plat = super().get_tag()
         
-        # PyPI rejects simple linux combinations; we need to use a manylinux tag
+
         if plat.startswith("linux_x86_64"):
             plat = "manylinux2014_x86_64"
         elif plat.startswith("linux_aarch64"):
             plat = "manylinux2014_aarch64"
             
-        # We don't use Python API, it's just a binary wrapper, so py3-none-plat
         return "py3", "none", plat
 
 setup(

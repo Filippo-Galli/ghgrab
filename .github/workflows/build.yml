@@ -70,34 +70,11 @@ jobs:
           dst="${{ matrix.release_name }}"
           cp "$src" "$dst"
 
-      # Also place it where setup.py looks for it during wheel build
-      - name: Prepare binary for Python wheel
-        shell: bash
-        run: |
-          mkdir -p ghgrab/
-          cp "target/${{ matrix.target }}/release/${{ matrix.artifact }}" "ghgrab/${{ matrix.artifact }}"
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Build Python wheel
-        run: |
-          python -m pip install build
-          python -m build
-
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.release_name }}
           path: ${{ matrix.release_name }}
-
-      - name: Upload Python wheel artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pywheel-${{ matrix.platform }}
-          path: dist/*.whl
 
   release:
     needs: build
@@ -147,12 +124,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all wheels
-        uses: actions/download-artifact@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          pattern: pywheel-*
-          path: dist
-          merge-multiple: true
+          python-version: '3.x'
 
       - name: Build sdist
         run: |
