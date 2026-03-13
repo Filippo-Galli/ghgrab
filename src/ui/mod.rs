@@ -609,11 +609,40 @@ async fn load_repo(state: Arc<Mutex<AppState>>, client: GitHubClient, mut gh_url
 
 async fn perform_download(state: Arc<Mutex<AppState>>) -> Result<()> {
     use crate::download::Downloader;
-    let (selected_items, _repo_path, repo_name, token) = {
+    let (items_to_download, _repo_path, repo_name, token) = {
         let s = state.lock().await;
         if let Some(url) = &s.current_url {
+            let selected = s.get_selected_items();
+            let mut final_items = Vec::new();
+
+            if let Some(full_tree) = &s.full_tree {
+                for top_item in selected {
+                    if top_item.is_dir() {
+                        let prefix = format!("{}/", top_item.path);
+                        let prefix_len = if let Some(slash_pos) = top_item.path.rfind('/') {
+                            slash_pos + 1
+                        } else {
+                            0
+                        };
+
+                        for tree_item in full_tree {
+                            if tree_item.path.starts_with(&prefix) && tree_item.is_file() {
+                                let mut file_item = tree_item.clone();
+                                file_item.name = tree_item.path[prefix_len..].to_string();
+                                file_item.selected = true;
+                                final_items.push(file_item);
+                            }
+                        }
+                    } else {
+                        final_items.push(top_item);
+                    }
+                }
+            } else {
+                final_items = selected;
+            }
+
             (
-                s.get_selected_items(),
+                final_items,
                 format!("{}/{}", url.owner, url.repo),
                 url.repo.clone(),
                 s.github_token.clone(),
@@ -628,11 +657,11 @@ async fn perform_download(state: Arc<Mutex<AppState>>) -> Result<()> {
         .context("Could not find User Downloads directory")?
         .join(repo_name);
 
-    let downloader = Downloader::new(download_dir, token)?;
+    let downloader = Downloader::new(download_dir.clone(), token)?;
     let state_c = state.clone();
 
     let result = downloader
-        .download_items(&selected_items, &_repo_path, move |msg| {
+        .download_items(&items_to_download, &_repo_path, move |msg| {
             let s = state_c.clone();
             tokio::spawn(async move {
                 let mut s = s.lock().await;
@@ -648,7 +677,10 @@ async fn perform_download(state: Arc<Mutex<AppState>>) -> Result<()> {
         Ok(errors) => {
             if errors.is_empty() {
                 s.status_message = "".to_string();
-                s.show_toast("Download Complete!".to_string(), ToastType::Success);
+                s.show_toast(
+                    format!("Downloaded to: {}", download_dir.display()),
+                    ToastType::Success,
+                );
             } else {
                 s.status_message = "".to_string();
                 s.show_toast(
@@ -717,9 +749,12 @@ fn map_tree_to_items(
             RepoItem {
                 name,
                 item_type,
+                url: format!(
+                    "https://api.github.com/repos/{}/{}/contents/{}?ref={}",
+                    owner, repo, &entry.path, branch
+                ),
                 path: entry.path,
                 download_url,
-                url: entry.url,
                 size: entry.size,
                 selected: false,
                 lfs_oid: None,
