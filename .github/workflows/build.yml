@@ -102,6 +102,7 @@ jobs:
   publish-npm:
     needs: release
     runs-on: ubuntu-latest
+    environment: ghgrab
     permissions:
       contents: read
       id-token: write
