@@ -80,6 +80,3 @@ If you find a bug, have an idea for a cool new feature, or just want to help out
 
 Distributed under the MIT License. It's open, free, and yours to play with. See [LICENSE](LICENSE) for the fine print.
 
----
-
-<p align="center">Made with ❤️ by ABHI</p>
