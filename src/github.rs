@@ -163,6 +163,23 @@ struct LfsDownloadAction {
     href: String,
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub struct GitTreeResponse {
+    pub tree: Vec<GitTreeEntry>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct GitTreeEntry {
+    pub path: String,
+    pub mode: String,
+    #[serde(rename = "type")]
+    pub entry_type: String,
+    pub size: Option<u64>,
+    pub sha: String,
+    pub url: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum GitHubError {
     #[error("Invalid token. Falling back to public API.")]
@@ -258,6 +275,25 @@ impl GitHubClient {
             .context("Failed to parse GitHub API response")?;
 
         Ok(items)
+    }
+
+    pub async fn fetch_recursive_tree(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> std::result::Result<GitTreeResponse, GitHubError> {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/git/trees/{}?recursive=1",
+            owner, repo, branch
+        );
+        let response = self.request(reqwest::Method::GET, &url, None).await?;
+
+        let tree: GitTreeResponse = response
+            .json()
+            .await
+            .map_err(|e| GitHubError::ApiError(e.to_string()))?;
+        Ok(tree)
     }
 
     // Fetch raw content

@@ -8,6 +8,7 @@ use ratatui::{
 
 use crate::github::{GitHubUrl, RepoItem};
 use crate::ui::theme::*;
+use std::collections::HashMap;
 
 pub struct BrowserState<'a> {
     pub items: &'a [RepoItem],
@@ -18,6 +19,7 @@ pub struct BrowserState<'a> {
     pub status_msg: &'a str,
     pub is_downloading: bool,
     pub ascii_mode: bool,
+    pub folder_sizes: &'a HashMap<String, u64>,
 }
 
 pub fn render(f: &mut Frame, area: Rect, state: &BrowserState) {
@@ -152,7 +154,11 @@ pub fn render(f: &mut Frame, area: Rect, state: &BrowserState) {
                     .map(|s| format!("{:>12}", format_size(s)))
                     .unwrap_or_else(|| format!("{:>12}", "-"))
             } else {
-                format!("{:>12}", "")
+                state
+                    .folder_sizes
+                    .get(&item.path)
+                    .map(|s| format!("{:>12}", format_size(*s)))
+                    .unwrap_or_else(|| format!("{:>12}", ""))
             };
 
             let display_name = if item.name.len() > 35 {

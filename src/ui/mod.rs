@@ -6,6 +6,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
+use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -45,6 +46,8 @@ pub struct AppState {
     pub toast: Option<Toast>,
     pub ascii_mode: bool,
     pub github_token: Option<String>,
+    pub full_tree: Option<Vec<RepoItem>>,
+    pub folder_sizes: HashMap<String, u64>,
 }
 
 impl Default for AppState {
@@ -69,6 +72,8 @@ impl AppState {
             toast: None,
             ascii_mode: false,
             github_token: None,
+            full_tree: None,
+            folder_sizes: HashMap::new(),
         }
     }
 
@@ -235,6 +240,7 @@ async fn event_loop(
                             status_msg: &state_lock.status_message,
                             is_downloading: state_lock.downloading,
                             ascii_mode: state_lock.ascii_mode,
+                            folder_sizes: &state_lock.folder_sizes,
                         };
                         components::browser::render(f, size, &browser_state);
                     }
@@ -342,21 +348,49 @@ async fn handle_input(
                 KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => {
                     if let Some((prev_url, prev_cursor)) = s.navigation_stack.pop() {
                         s.status_message = "Heading back...".to_string();
-                        drop(s);
+                        let current_url = prev_url.clone();
+                        let cursor_pos = prev_cursor;
 
-                        match client.fetch_contents(&prev_url.api_url()).await {
-                            Ok(items) => {
-                                let mut s = state.lock().await;
-                                s.items = items;
-                                s.current_url = Some(prev_url);
-                                s.cursor = prev_cursor;
-                                s.scroll_offset = 0;
-                            }
-                            Err(e) => {
-                                let mut s = state.lock().await;
-                                s.show_toast(format!("Nav Error: {}", e), ToastType::Error);
-                            }
-                        };
+                        if let Some(full_tree) = &s.full_tree {
+                            let next_items = if current_url.path.is_empty() {
+                                full_tree
+                                    .iter()
+                                    .filter(|i| !i.path.contains('/'))
+                                    .cloned()
+                                    .collect()
+                            } else {
+                                let prefix = format!("{}/", current_url.path);
+                                full_tree
+                                    .iter()
+                                    .filter(|i| {
+                                        i.path.starts_with(&prefix)
+                                            && !i.path[prefix.len()..].contains('/')
+                                    })
+                                    .cloned()
+                                    .collect()
+                            };
+
+                            s.items = next_items;
+                            s.current_url = Some(current_url);
+                            s.cursor = cursor_pos;
+                            s.scroll_offset = 0;
+                            s.status_message = String::new();
+                        } else {
+                            drop(s);
+                            match client.fetch_contents(&prev_url.api_url()).await {
+                                Ok(items) => {
+                                    let mut s = state.lock().await;
+                                    s.items = items;
+                                    s.current_url = Some(prev_url);
+                                    s.cursor = prev_cursor;
+                                    s.scroll_offset = 0;
+                                }
+                                Err(e) => {
+                                    let mut s = state.lock().await;
+                                    s.show_toast(format!("Nav Error: {}", e), ToastType::Error);
+                                }
+                            };
+                        }
                     } else {
                         s.mode = AppMode::Input;
                     }
@@ -375,24 +409,43 @@ async fn handle_input(
                                 };
 
                                 let new_url = GitHubUrl {
-                                    path: new_path,
+                                    path: new_path.clone(),
                                     ..current_url
                                 };
 
-                                drop(s);
+                                if let Some(full_tree) = &s.full_tree {
+                                    let prefix = format!("{}/", new_path);
+                                    let next_items = full_tree
+                                        .iter()
+                                        .filter(|i| {
+                                            i.path.starts_with(&prefix)
+                                                && !i.path[prefix.len()..].contains('/')
+                                        })
+                                        .cloned()
+                                        .collect();
 
-                                match client.fetch_contents(&new_url.api_url()).await {
-                                    Ok(items) => {
-                                        let mut s = state.lock().await;
-                                        s.items = items;
-                                        s.current_url = Some(new_url);
-                                        s.cursor = 0;
-                                        s.scroll_offset = 0;
-                                    }
-                                    Err(e) => {
-                                        let mut s = state.lock().await;
-                                        s.navigation_stack.pop();
-                                        s.show_toast(format!("Nav Error: {}", e), ToastType::Error);
+                                    s.items = next_items;
+                                    s.current_url = Some(new_url);
+                                    s.cursor = 0;
+                                    s.scroll_offset = 0;
+                                } else {
+                                    drop(s);
+                                    match client.fetch_contents(&new_url.api_url()).await {
+                                        Ok(items) => {
+                                            let mut s = state.lock().await;
+                                            s.items = items;
+                                            s.current_url = Some(new_url);
+                                            s.cursor = 0;
+                                            s.scroll_offset = 0;
+                                        }
+                                        Err(e) => {
+                                            let mut s = state.lock().await;
+                                            s.navigation_stack.pop();
+                                            s.show_toast(
+                                                format!("Nav Error: {}", e),
+                                                ToastType::Error,
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -426,77 +479,130 @@ async fn load_repo(state: Arc<Mutex<AppState>>, client: GitHubClient, mut gh_url
 
     {
         let mut s = state_c.lock().await;
-        s.status_message = "Fetching contents...".to_string();
+        s.status_message = "Fetching repository tree...".to_string();
         s.mode = AppMode::Searching;
     }
 
-    let mut result = current_client.fetch_contents(&gh_url.api_url()).await;
+    let mut tree_result = current_client
+        .fetch_recursive_tree(&gh_url.owner, &gh_url.repo, &gh_url.branch)
+        .await;
 
-    // Auth Fallback
-    if let Err(e) = &result {
-        if let Some(GitHubError::InvalidToken) = e.downcast_ref::<GitHubError>() {
-            {
-                let mut s = state_c.lock().await;
-                s.show_toast(
-                    "Invalid token! Falling back to public repositories.".to_string(),
-                    ToastType::Warning,
-                );
-            }
-            if let Ok(no_auth_client) = GitHubClient::new(None) {
-                current_client = no_auth_client;
-                result = current_client.fetch_contents(&gh_url.api_url()).await;
-            }
+    if let Err(GitHubError::InvalidToken) = &tree_result {
+        {
+            let mut s = state_c.lock().await;
+            s.show_toast(
+                "Invalid token! Falling back to public API.".to_string(),
+                ToastType::Warning,
+            );
+        }
+        if let Ok(no_auth_client) = GitHubClient::new(None) {
+            current_client = no_auth_client;
+            tree_result = current_client
+                .fetch_recursive_tree(&gh_url.owner, &gh_url.repo, &gh_url.branch)
+                .await;
         }
     }
 
-    if let Err(e) = &result {
-        if let Some(GitHubError::NotFound(_)) = e.downcast_ref::<GitHubError>() {
-            if gh_url.branch == "main" {
-                gh_url.branch = "master".to_string();
-                {
-                    let mut s = state_c.lock().await;
-                    s.status_message = "Trying master branch...".to_string();
-                }
-                result = current_client.fetch_contents(&gh_url.api_url()).await;
+    if let Err(GitHubError::NotFound(_)) = &tree_result {
+        if gh_url.branch == "main" {
+            gh_url.branch = "master".to_string();
+            {
+                let mut s = state_c.lock().await;
+                s.status_message = "Trying master branch...".to_string();
             }
+            tree_result = current_client
+                .fetch_recursive_tree(&gh_url.owner, &gh_url.repo, &gh_url.branch)
+                .await;
         }
     }
 
-    match result {
-        Ok(mut items) => {
-            {
-                let mut s = state_c.lock().await;
-                s.status_message = "Resolving LFS files...".to_string();
-            }
+    match tree_result {
+        Ok(tree_response) => {
+            let items =
+                map_tree_to_items(tree_response, &gh_url.owner, &gh_url.repo, &gh_url.branch);
+            let folder_sizes = calculate_folder_sizes(&items);
+
+            let mut s = state_c.lock().await;
+            s.full_tree = Some(items.clone());
+            s.folder_sizes = folder_sizes;
+
+            let current_path = gh_url.path.clone();
+            let mut current_items: Vec<RepoItem> = if current_path.is_empty() {
+                items
+                    .iter()
+                    .filter(|i| !i.path.contains('/'))
+                    .cloned()
+                    .collect()
+            } else {
+                let prefix = format!("{}/", current_path);
+                items
+                    .iter()
+                    .filter(|i| {
+                        i.path.starts_with(&prefix) && !i.path[prefix.len()..].contains('/')
+                    })
+                    .cloned()
+                    .collect()
+            };
+
+            drop(s);
             current_client
-                .resolve_lfs_files(&mut items, &gh_url.owner, &gh_url.repo, &gh_url.branch)
+                .resolve_lfs_files(
+                    &mut current_items,
+                    &gh_url.owner,
+                    &gh_url.repo,
+                    &gh_url.branch,
+                )
                 .await;
 
             let mut s = state_c.lock().await;
-            s.items = items;
+            s.items = current_items;
             s.current_url = Some(gh_url);
             s.mode = AppMode::Browse;
             s.status_message = String::new();
-            s.show_toast("Repository Loaded!".to_string(), ToastType::Success);
+            s.show_toast(
+                "Repository Loaded (Cached)!".to_string(),
+                ToastType::Success,
+            );
         }
-        Err(e) => {
-            let mut s = state_c.lock().await;
-            s.mode = AppMode::Input;
+        Err(_) => {
+            {
+                let mut s = state_c.lock().await;
+                s.status_message =
+                    "Tree too large, falling back to folder-by-folder...".to_string();
+                s.full_tree = None;
+            }
 
-            let err_msg = if let Some(gh_err) = e.downcast_ref::<GitHubError>() {
-                match gh_err {
-                    GitHubError::RateLimitReached(user) => format!(
-                        "Rate limit reached for {}. Add a token in config for more!",
-                        user
-                    ),
-                    GitHubError::NotFound(_) => "Repository or path not found.".to_string(),
-                    _ => format!("Error: {}", gh_err),
-                }
-            } else {
-                format!("Error: {}", e)
-            };
+            let result = current_client.fetch_contents(&gh_url.api_url()).await;
 
-            s.show_toast(err_msg, ToastType::Error);
+            if let Err(e) = result {
+                let mut s = state_c.lock().await;
+                s.mode = AppMode::Input;
+                let err_msg = if let Some(gh_err) = e.downcast_ref::<GitHubError>() {
+                    match gh_err {
+                        GitHubError::RateLimitReached(user) => format!(
+                            "Rate limit reached for {}. Add a token in config for more!",
+                            user
+                        ),
+                        GitHubError::NotFound(_) => "Repository or path not found.".to_string(),
+                        _ => format!("Error: {}", gh_err),
+                    }
+                } else {
+                    format!("Error: {}", e)
+                };
+
+                s.show_toast(err_msg, ToastType::Error);
+            } else if let Ok(mut items) = result {
+                current_client
+                    .resolve_lfs_files(&mut items, &gh_url.owner, &gh_url.repo, &gh_url.branch)
+                    .await;
+
+                let mut s = state_c.lock().await;
+                s.items = items;
+                s.current_url = Some(gh_url);
+                s.mode = AppMode::Browse;
+                s.status_message = String::new();
+                s.show_toast("Repository Loaded!".to_string(), ToastType::Success);
+            }
         }
     }
 }
@@ -558,4 +664,68 @@ async fn perform_download(state: Arc<Mutex<AppState>>) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn calculate_folder_sizes(items: &[RepoItem]) -> HashMap<String, u64> {
+    let mut sizes = HashMap::new();
+    for item in items {
+        if item.is_file() {
+            let path = &item.path;
+            let parts: Vec<&str> = path.split('/').collect();
+            for i in 1..parts.len() {
+                let parent_path = parts[..i].join("/");
+                if !parent_path.is_empty() {
+                    let entry = sizes.entry(parent_path).or_insert(0);
+                    *entry += item.actual_size().unwrap_or(0);
+                }
+            }
+        }
+    }
+    sizes
+}
+
+fn map_tree_to_items(
+    tree: crate::github::GitTreeResponse,
+    owner: &str,
+    repo: &str,
+    branch: &str,
+) -> Vec<RepoItem> {
+    tree.tree
+        .into_iter()
+        .map(|entry| {
+            let name = entry
+                .path
+                .split('/')
+                .last()
+                .unwrap_or(&entry.path)
+                .to_string();
+            let item_type = if entry.entry_type == "tree" {
+                "dir".to_string()
+            } else {
+                "file".to_string()
+            };
+
+            let download_url = if item_type == "file" {
+                Some(format!(
+                    "https://raw.githubusercontent.com/{}/{}/{}/{}",
+                    owner, repo, branch, entry.path
+                ))
+            } else {
+                None
+            };
+
+            RepoItem {
+                name,
+                item_type,
+                path: entry.path,
+                download_url,
+                url: entry.url,
+                size: entry.size,
+                selected: false,
+                lfs_oid: None,
+                lfs_size: None,
+                lfs_download_url: None,
+            }
+        })
+        .collect()
 }
