@@ -1,6 +1,6 @@
 {
   "name": "@ghgrab/ghgrab",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "A terminal-based tool for downloading specific files and folders from GitHub repositories",
   "bin": {
     "ghgrab": "bin/ghgrab.js"
@@ -19,7 +19,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/abhixdd/ghgrab.git"
+    "url": "git+https://github.com/abhixdd/ghgrab.git"
   },
   "os": [
     "darwin",
