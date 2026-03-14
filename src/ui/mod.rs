@@ -403,7 +403,7 @@ async fn handle_input(
                 if key.modifiers.contains(KeyModifiers::CONTROL)
                     || key.modifiers.contains(KeyModifiers::ALT)
                     || key.modifiers.contains(KeyModifiers::SUPER)
-                    || s.url_input.len() > 0
+                    || !s.url_input.is_empty()
                 // User said "just del" to remove full URL
                 {
                     s.url_input.clear();
