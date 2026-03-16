@@ -21,16 +21,16 @@
       {
         packages.default = pkgs.rustPlatform.buildRustPackage rec {
           pname = "ghgrab";
-          version = "1.0.2";
+          version = "1.0.1";
 
           src = pkgs.fetchFromGitHub {
             owner = "abhixdd";
             repo = "ghgrab";
             rev = "v${version}";
-            sha256 = pkgs.lib.fakeHash;
+            sha256 = "sha256-hcQU00DjcnHrlie8qsIvvtsyiyuqD9dSiWu1c0mv6fs=";
           };
 
-          cargoHash = pkgs.lib.fakeHash;
+          cargoHash = "sha256-SGcbdpcvK9F3q4x+bMwGdLARMg3ResqS8k0ToMfSBAw=";
 
           nativeBuildInputs = [ pkgs.pkg-config ];
 
